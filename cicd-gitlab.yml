@@ -1,0 +1,125 @@
+stages:
+  - build
+  - test
+  - security
+  - staging
+  - production
+
+variables:
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_DRIVER: overlay2
+  CI_REGISTRY: gitlab.example.com:5050
+  CI_REGISTRY_IMAGE: $CI_REGISTRY/your-group/your-project
+  NODE_ENV: test
+
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - node_modules/
+
+.node_template: &node_template
+  image: node:18-alpine
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+
+build:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+  only:
+    - main
+    - merge_requests
+
+lint:
+  <<: *node_template
+  stage: test
+  script:
+    - npm run lint
+  only:
+    - main
+    - merge_requests
+
+unit_test:
+  <<: *node_template
+  stage: test
+  services:
+    - mongo:5
+  variables:
+    MONGODB_URI: "mongodb://mongo:27017/test_db"
+  script:
+    - npm run test:unit
+  only:
+    - main
+    - merge_requests
+
+integration_test:
+  <<: *node_template
+  stage: test
+  services:
+    - mongo:5
+  variables:
+    MONGODB_URI: "mongodb://mongo:27017/test_db"
+  script:
+    - npm run test:integration
+  only:
+    - main
+    - merge_requests
+
+security_scan:
+  stage: security
+  image: docker:stable
+  services:
+    - docker:stable-dind
+  variables:
+    DOCKER_DRIVER: overlay2
+  allow_failure: true
+  script:
+    - docker run --rm -v $(pwd):/app -w /app snyk/snyk-cli:docker snyk test --docker $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA --file=Dockerfile
+  only:
+    - main
+    - merge_requests
+
+deploy_staging:
+  stage: staging
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA $CI_REGISTRY_IMAGE:staging
+    - docker push $CI_REGISTRY_IMAGE:staging
+    - docker stop blog-api-staging || true
+    - docker rm blog-api-staging || true
+    - docker run -d --name blog-api-staging -p 3001:3000 --env-file .env.staging $CI_REGISTRY_IMAGE:staging
+  environment:
+    name: staging
+    url: http://staging.example.com
+  only:
+    - main
+
+deploy_production:
+  stage: production
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA $CI_REGISTRY_IMAGE:production
+    - docker push $CI_REGISTRY_IMAGE:production
+    - docker stop blog-api-production || true
+    - docker rm blog-api-production || true
+    - docker run -d --name blog-api-production -p 3000:3000 --env-file .env.production $CI_REGISTRY_IMAGE:production
+  environment:
+    name: production
+    url: http://example.com
+  when: manual
+  only:
+    - main

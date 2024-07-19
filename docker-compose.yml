@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  app:
+    image: ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=${PORT:-3000}
+      - MONGODB_URI=${MONGODB_URI:-mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongo:27017/blogdb?authSource=admin}
+      - JWT_SECRET=${JWT_SECRET}
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-3000}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:latest
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
+    healthcheck:
+      test: >
+        mongosh --quiet --eval 'db.runCommand("ping").ok' 
+        --host localhost:27017 
+        --username ${MONGO_ROOT_USERNAME} 
+        --password ${MONGO_ROOT_PASSWORD} 
+        --authenticationDatabase admin
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+  seed:
+    image: ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}
+    command: ["node", "seed.js"]
+    environment:
+      - NODE_ENV=production
+      - MONGODB_URI=${MONGODB_URI:-mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongo:27017/blogdb?authSource=admin}
+    env_file:
+      - .env
+    depends_on:
+      mongo:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200k"
+        max-file: "10"
+
+volumes:
+  mongo-data:

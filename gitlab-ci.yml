@@ -1,0 +1,45 @@
+stages:
+  - build
+  - deploy
+
+variables:
+  DOCKER_TLS_CERTDIR: ""
+  # DOCKER_HOST: tcp://docker:2375
+  DOCKER_DRIVER: overlay2
+  CI_REGISTRY: "192.168.1.217:5050"
+  CI_REGISTRY_IMAGE: $CI_REGISTRY/$CI_PROJECT_PATH
+
+services:
+  - name: docker:dind
+    command: ["--insecure-registry=192.168.1.217:5050"]
+
+build:
+  stage: build
+  image: docker:latest
+  before_script:
+    # - docker info
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+  only:
+    - main
+
+deploy:
+  stage: deploy
+  image: docker:latest
+  before_script:
+    - apk add --no-cache docker-compose curl
+    - echo -n $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
+  script:
+    - echo "$ENV_FILE" > .env
+    - export CI_REGISTRY_IMAGE=$CI_REGISTRY_IMAGE
+    - export CI_COMMIT_SHORT_SHA=$CI_COMMIT_SHORT_SHA
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker-compose config # This will show the composed file with variables replaced
+    # - docker-compose pull
+    - docker-compose up -d
+  only:
+    - main
+  environment:
+    name: production
