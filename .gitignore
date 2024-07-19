@@ -135,6 +135,3 @@ coverage/
 # Scripts Directory
 scripts/
 Dockerfile.seed
-
-# GitHub Actions (Running locally using act)
-.github/workflows/ci-cd.yml
