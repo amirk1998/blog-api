@@ -137,4 +137,4 @@ scripts/
 Dockerfile.seed
 
 # GitHub Actions (Running locally using act)
-.github/
+.github/workflows/ci-cd.yml
